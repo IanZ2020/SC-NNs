@@ -27,7 +27,7 @@ class S2F:
         elif self.mode == 'unipolar':
             return torch.sum(x_bitstream, dim=-1).div(x_bitstream.shape[-1])
     def __call__(self, x_bitstream: torch.tensor) -> torch.tensor:
-        return self.evaluate(x_float)
+        return self.evaluate(x_bitstream)
         
 
 # x = SNG(seq_len=100)
