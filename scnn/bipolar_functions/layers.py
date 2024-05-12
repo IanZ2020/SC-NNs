@@ -47,7 +47,7 @@ class APCLinearAct():
                  in_features,
                  out_features,
                  seq_len,
-                 btanh_scalar,
+                 scalar=1.,
                  num_au_layers=1,
                  is_bias=False) -> None:
         super().__init__()
@@ -58,14 +58,14 @@ class APCLinearAct():
         self.is_bias = is_bias
         self.weight = None
         self.bias = None
-        self.btanh_scalar =  btanh_scalar
+        self.scalar = scalar
         self.num_au_layers = num_au_layers
         self.states = self.get_btanh_states()
 
     def get_btanh_states(self,):
         q = 1.835*(2*self.in_features)**(-0.5552)
-        r_prime = 2*self.in_features + 2*(self.btanh_scalar-1)*(self.in_features-1)/(1-q)
-        return int(round(r_prime/2.)*2)
+        r_prime = 2*self.in_features + 2*(self.scalar-1)*(self.in_features-1)/(1-q)
+        return int(torch.round(r_prime/2.)*2)
 
     def load_weight(self, data):
         assert data['weight'].shape == torch.Size([self.in_features, self.out_features])
@@ -98,6 +98,7 @@ class APCLinear():
                  in_features,
                  out_features,
                  seq_len,
+                 scalar=1.,
                  num_au_layers=1,
                  bias=False) -> None:
         super().__init__()
@@ -108,6 +109,7 @@ class APCLinear():
         self.is_bias = bias
         self.weight = None
         self.bias = None
+        self.scalar = scalar
         self.num_au_layers = num_au_layers
 
     def load_weight(self, data):
@@ -131,6 +133,6 @@ class APCLinear():
             inputs = torch.concat([inputs, bias_input],dim=-2)
 
         for i in range(self.out_features):
-            out[...,i] = apc(mul(inputs, self.weight[:,i])).sum(dim=-1) / self.seq_len
+            out[...,i] = apc(mul(inputs, self.weight[:,i])).sum(dim=-1) * self.scalar / self.seq_len
 
         return out
