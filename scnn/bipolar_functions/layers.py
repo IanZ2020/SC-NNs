@@ -1,5 +1,5 @@
 import torch
-from operations import *
+from .operations import *
 from ..convertors import F2S
 
 
@@ -26,33 +26,40 @@ class MUXScaled_Linear():
 
         if self.is_bias:
             assert data['bias'].shape == torch.Size([self.out_features])
-            self.bias = F2S(seq_len=self.seq_len)(data['bias']/self.in_features)
+            self.bias = F2S(seq_len=self.seq_len)(data['bias'])
+            if len(self.bias.shape) <=2 : 
+                self.bias = self.bias.unsqueeze(dim=0)
+            self.weight = torch.cat([self.weight, self.bias], dim=0)
 
     def forward(self, inputs):
         assert self.weight is not None
-        out = scaled_matmul(inputs, self.weight)
+        if self.is_bias:
+            bias_input = torch.ones(1,self.seq_len, dtype=torch.bool).expand(inputs.shape[:-2]+(1,-1,))
+            inputs = torch.concat([inputs, bias_input],dim=-2)
 
-        out = scaled_add(out, self.bias)
+        out = scaled_matmul(inputs, self.weight)
 
         return out
 
 
-class APCLinear():
+class APCLinearAct():
     def __init__(self, 
                  in_features,
                  out_features,
                  seq_len,
                  btanh_scalar,
-                 bias=False) -> None:
+                 num_au_layers=1,
+                 is_bias=False) -> None:
         super().__init__()
 
         self.in_features = in_features
         self.out_features = out_features
         self.seq_len = seq_len
-        self.is_bias = bias
+        self.is_bias = is_bias
         self.weight = None
         self.bias = None
         self.btanh_scalar =  btanh_scalar
+        self.num_au_layers = num_au_layers
         self.states = self.get_btanh_states()
 
     def get_btanh_states(self,):
@@ -67,15 +74,63 @@ class APCLinear():
 
         if self.is_bias:
             assert data['bias'].shape == torch.Size([self.out_features])
-            self.bias = F2S(seq_len=self.seq_len)(data['bias']/self.in_features)
+            self.bias = F2S(seq_len=self.seq_len)(data['bias'])
+            if len(self.bias.shape) <=2 : 
+                self.bias = self.bias.unsqueeze(dim=0)
+            self.weight = torch.cat([self.weight, self.bias], dim=0)
 
     def forward(self, inputs):
         out = torch.zeros(inputs.shape[:-2] + (self.out_features,self.seq_len,))
 
-        for i in range(self.out_features):
-            out[...,i,:] = apc_btanh(mul(inputs, self.weight[:,i]), self.states)
+        if self.is_bias:
+            bias_input = torch.ones(1,self.seq_len, dtype=torch.bool).expand(inputs.shape[:-2]+(1,-1,))
+            inputs = torch.concat([inputs, bias_input],dim=-2)
 
-        if self.bias:
-            out = scaled_add(out,self.bias)
+        for i in range(self.out_features):
+            out[...,i,:] = apc_btanh(mul(inputs, self.weight[:,i]), self.states, self.num_au_layers)
+
+
+        return out
+
+
+class APCLinear():
+    def __init__(self, 
+                 in_features,
+                 out_features,
+                 seq_len,
+                 num_au_layers=1,
+                 bias=False) -> None:
+        super().__init__()
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.seq_len = seq_len
+        self.is_bias = bias
+        self.weight = None
+        self.bias = None
+        self.num_au_layers = num_au_layers
+
+    def load_weight(self, data):
+        assert data['weight'].shape == torch.Size([self.in_features, self.out_features])
+
+        self.weight = F2S(seq_len=self.seq_len)(data['weight'])
+
+        if self.is_bias:
+            assert data['bias'].shape == torch.Size([self.out_features])
+            self.bias = F2S(seq_len=self.seq_len)(data['bias'])
+            if len(self.bias.shape) <=2 : 
+                self.bias = self.bias.unsqueeze(dim=0)
+            self.weight = torch.cat([self.weight, self.bias], dim=0)
+
+    def forward(self, inputs):
+        out = torch.zeros(inputs.shape[:-2] + (self.out_features,))
+        apc = ap_counter(in_features=inputs.shape[-2], num_au_layers=self.num_au_layers)
+
+        if self.is_bias:
+            bias_input = torch.ones(1,self.seq_len, dtype=torch.bool).expand(inputs.shape[:-2]+(1,-1,))
+            inputs = torch.concat([inputs, bias_input],dim=-2)
+
+        for i in range(self.out_features):
+            out[...,i] = apc(mul(inputs, self.weight[:,i])).sum(dim=-1) / self.seq_len
 
         return out
