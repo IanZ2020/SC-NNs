@@ -69,9 +69,10 @@ class ap_counter():
 
         num_units = int(self.in_features/4)
 
-        grp1,grp2,grp3,grp4 = x[...,:num_units,:], x[...,num_units: 2*num_units,:], x[...,2*num_units: 3*num_units,:], x[...,3*num_units: 4*num_units,:]
+        idx1, idx2, idx3, idx4 = [torch.arange(i, self.in_features, 4) for i in range(4)]
+        grp1, grp2, grp3, grp4 = x[...,idx1,:], x[...,idx2,:], x[...,idx3,:], x[...,idx4,:]
         
-        out = torch.concat([torch.logical_or(grp3,grp4), torch.logical_and(grp1,grp2)], dim=-2)
+        out = torch.concat([torch.logical_or(grp1,grp2), torch.logical_and(grp3,grp4)], dim=-2)
         
         return out
     
@@ -80,9 +81,7 @@ class ap_counter():
     
     def __call__(self, x):
         for i in range(self.num_au_layers):
-            print(x.shape)
             x = self.approx_unit(x)
-            print(x.shape)
         return 2**self.num_au_layers*self.counter(x)
  
 
