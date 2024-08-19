@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-x_train, x_test = np.array((x_train-128)/128,dtype="<f4"), np.array((x_test-128)/128.0,dtype="<f4")
+x_train, x_test = np.array(x_train/255.0,dtype="<f4"), np.array(x_test/255.0,dtype="<f4")
 
 idx=np.argsort(y_train.flatten())
 vdx=np.array([6000*i+j for i in range(10) for j in range(5400,6000)])

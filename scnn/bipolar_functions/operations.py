@@ -59,31 +59,77 @@ def counter(x):
 class ap_counter():
     def __init__(self, in_features=16, num_au_layers=1):
         self.num_au_layers = num_au_layers
-        self.in_features = int(math.ceil(in_features/4**num_au_layers) * 4**num_au_layers)
+        self.in_features = in_features
 
     def approx_unit(self, x: torch.tensor) -> torch.tensor:
         seq_len = x.shape[-1]
-        assert x.shape[-2] <= self.in_features
-        if x.shape[-2] < self.in_features:
-            x = torch.cat([x, torch.zeros(x.shape[:-2]+(self.in_features-x.shape[-2],seq_len,), dtype=torch.bool)],dim=-2)
+        half = int(seq_len/2)
+        # assert x.shape[-2] <= self.in_features
+        # if x.shape[-2] < self.in_features:
+        #     x = torch.cat([x, torch.zeros(x.shape[:-2]+(self.in_features-x.shape[-2],seq_len,), dtype=torch.bool)],dim=-2)
 
-        num_units = int(self.in_features/4)
-
-        idx1, idx2, idx3, idx4 = [torch.arange(i, self.in_features, 4) for i in range(4)]
+        idx1, idx2, idx3, idx4 = [torch.arange(i, x.shape[-2], 4) for i in range(4)]
         grp1, grp2, grp3, grp4 = x[...,idx1,:], x[...,idx2,:], x[...,idx3,:], x[...,idx4,:]
+
         
-        out = torch.concat([torch.logical_or(grp1,grp2), torch.logical_and(grp3,grp4)], dim=-2)
         
+        out1 = torch.concat([torch.logical_or(grp1[...,:half],grp2[...,:half]), torch.logical_and(grp3[...,:half],grp4[...,:half])], dim=-2)
+        out2 = torch.concat([torch.logical_and(grp1[...,half:],grp2[...,half:]), torch.logical_or(grp3[...,half:],grp4[...,half:])], dim=-2)
+        return torch.concat([out1,out2],dim=-1)
+
+        out = torch.concat([torch.logical_or(grp1[...,:],grp2[...,:]), torch.logical_and(grp3[...,:],grp4[...,:])], dim=-2)
+
         return out
+        
     
     def counter(self, x):
         return torch.sum(x, dim=-2, dtype=torch.int16)
     
     def __call__(self, x):
+        count = 0
         for i in range(self.num_au_layers):
+            num_units = int(x.shape[-2]/4)
+            x, res = x[...,0:4*num_units,:], x[...,4*num_units:,:] 
             x = self.approx_unit(x)
-        return 2**self.num_au_layers*self.counter(x)
+            count += torch.tensor(2**i, dtype=torch.int16)*self.counter(res)
+        return torch.tensor(2**self.num_au_layers, dtype=torch.int16)*self.counter(x)+count
  
+class s_counter():
+    def __init__(self, in_features=16, num_au_layers=1):
+        self.num_au_layers = num_au_layers
+        self.in_features = in_features
+        
+
+    def approx_unit(self, x: torch.tensor) -> torch.tensor:
+        seq_len = x.shape[-1]
+        half = int(seq_len/2)
+        # assert x.shape[-2] <= self.in_features
+        # if x.shape[-2] < self.in_features:
+        #     x = torch.cat([x, torch.zeros(x.shape[:-2]+(self.in_features-x.shape[-2],seq_len,), dtype=torch.bool)],dim=-2)
+
+        idx1, idx2, idx3, idx4 = [torch.arange(i, x.shape[-2], 4) for i in range(4)]
+        grp1, grp2, grp3, grp4 = x[...,idx1,:], x[...,idx2,:], x[...,idx3,:], x[...,idx4,:]
+
+        random_idx = torch.randint(low=0, high=2, size=(seq_len,))
+
+        out1 = torch.concat([grp1.unsqueeze(dim=-2),grp2.unsqueeze(dim=-2)],dim=-2)[...,random_idx, torch.arange(seq_len)]
+
+        out2 = torch.concat([grp3.unsqueeze(dim=-2),grp4.unsqueeze(dim=-2)],dim=-2)[...,random_idx, torch.arange(seq_len)]
+        
+        return torch.concat([out1,out2],dim=-2)
+        
+    
+    def counter(self, x):
+        return torch.sum(x, dim=-2, dtype=torch.int16)
+    
+    def __call__(self, x):
+        count = 0
+        for i in range(self.num_au_layers):
+            num_units = int(x.shape[-2]/4)
+            x, res = x[...,0:4*num_units,:], x[...,4*num_units:,:] 
+            x = self.approx_unit(x)
+            count += torch.tensor(2**i, dtype=torch.int16)*self.counter(res)
+        return torch.tensor(2**self.num_au_layers, dtype=torch.int16)*self.counter(x)+count
 
 def get_btanh_scalar(in_features, num_states):
     q = 1.835*(2*in_features)**(-0.5552)
@@ -115,3 +161,21 @@ def apc_btanh(inputs, r: int, num_au_layers=1):
         out[..., i] = s > s_half
     return out
 
+#tanh(rx/2)
+def stanh(inputs, r:int):
+    seq_len = inputs.shape[-1]
+    s_max = r-1
+    s_half = (r-1)/2
+
+    s = torch.full(inputs.shape[:-1], s_half, dtype=torch.int16)
+
+    out = torch.zeros(inputs.shape, dtype=torch.bool)
+
+    for i in range(seq_len):
+        s = s+inputs[...,i].to(torch.int16)*2-1
+        overflow_idx = s > s_max
+        underflow_idx = s < 0
+        s[overflow_idx] = s_max
+        s[underflow_idx] = 0
+        out[...,i] = s>s_half
+    return out
